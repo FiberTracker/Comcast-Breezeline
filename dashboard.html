@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>if(sessionStorage.getItem("auth")!=="1")window.location.href="index.html";</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comcast / Breezeline: Acquisition Overlap Analysis</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#fff; color:#1a1a1a; font-family:'Segoe UI',system-ui,-apple-system,sans-serif; line-height:1.5; }
+  .container { max-width:1480px; margin:0 auto; padding:16px 24px; }
+
+  /* Header */
+  .header { border-bottom:2px solid #1a1a1a; padding-bottom:8px; margin-bottom:16px; }
+  h1 { font-size:1.4rem; font-weight:700; color:#1a1a1a; }
+  .subtitle { color:#6b7280; font-size:0.78rem; margin-top:2px; }
+  .badge { display:inline-block; background:#dc2626; color:#fff; font-size:0.58rem; padding:1px 7px; border-radius:2px; font-weight:700; letter-spacing:0.5px; vertical-align:middle; margin-left:8px; }
+
+  /* Summary strip */
+  .strip { display:flex; gap:0; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:16px; overflow:hidden; background:#fff; }
+  .strip-item { flex:1; padding:12px 14px; border-right:1px solid #e5e7eb; }
+  .strip-item:last-child { border-right:none; }
+  .strip-label { font-size:0.62rem; color:#6b7280; text-transform:uppercase; letter-spacing:0.6px; font-weight:600; }
+  .strip-val { font-size:1.3rem; font-weight:700; }
+  .strip-sub { font-size:0.68rem; color:#9ca3af; }
+
+  /* National map */
+  .national-map { width:100%; height:520px; border-radius:6px; border:1px solid #d1d5db; margin-bottom:8px; }
+
+  /* Metro map sections */
+  .metro-section { margin:28px 0 0; page-break-inside:avoid; }
+  .metro-header { display:flex; align-items:baseline; gap:12px; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #e5e7eb; }
+  .metro-title { font-size:1.05rem; font-weight:700; color:#1a1a1a; }
+  .metro-stats { font-size:0.72rem; color:#6b7280; }
+  .metro-stats span { font-weight:700; }
+  .metro-map { width:100%; height:480px; border-radius:6px; border:1px solid #d1d5db; }
+  .metro-note { font-size:0.64rem; color:#9ca3af; margin-top:4px; line-height:1.5; }
+
+  /* Popup */
+  .leaflet-popup-content-wrapper { background:#fff; color:#1a1a1a; border:1px solid #d1d5db; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.12); }
+  .leaflet-popup-tip { background:#fff; }
+  .leaflet-popup-content { font-size:0.78rem; line-height:1.5; margin:10px 14px; }
+  .popup-hdr { font-weight:700; font-size:0.85rem; margin-bottom:6px; padding-bottom:4px; border-bottom:1px solid #e5e7eb; }
+  .popup-row { display:flex; justify-content:space-between; gap:12px; padding:2px 0; }
+  .popup-lbl { color:#6b7280; }
+  .popup-val { font-weight:600; }
+
+  /* Legend */
+  .legend { background:#fff; border:1px solid #d1d5db; border-radius:6px; padding:10px 12px; font-size:0.7rem; color:#374151; box-shadow:0 1px 4px rgba(0,0,0,0.08); line-height:1.7; }
+  .legend-title { font-weight:700; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.4px; color:#1a1a1a; margin-bottom:3px; }
+  .legend-swatch { display:inline-block; width:14px; height:10px; border-radius:2px; margin-right:6px; vertical-align:middle; border:1px solid rgba(0,0,0,0.1); }
+
+  /* Callout */
+  .callout {
+    display:flex; align-items:center; gap:20px; flex-wrap:wrap;
+    background:#fafafa; border:1px solid #e5e7eb; border-left:4px solid #059669;
+    border-radius:0 6px 6px 0; padding:14px 20px; margin-bottom:16px;
+  }
+  .co-block { text-align:center; }
+  .co-label { font-size:0.62rem; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
+  .co-val { font-size:1.5rem; font-weight:700; }
+  .co-sub { font-size:0.68rem; color:#9ca3af; }
+  .co-arrow { color:#d1d5db; font-size:1.3rem; }
+
+  /* Tables */
+  h2 { font-size:1rem; font-weight:700; color:#1a1a1a; margin:24px 0 8px; padding-bottom:4px; border-bottom:1px solid #e5e7eb; }
+  .table-wrap { overflow-x:auto; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:20px; }
+  table.main { width:100%; border-collapse:collapse; font-size:0.73rem; }
+  table.main th {
+    background:#f8fafc; color:#374151; font-weight:700; text-align:left;
+    padding:8px 8px; white-space:nowrap; position:sticky; top:0;
+    font-size:0.62rem; text-transform:uppercase; letter-spacing:0.4px;
+    border-bottom:2px solid #e5e7eb;
+  }
+  table.main th.num { text-align:right; }
+  table.main td { padding:5px 8px; border-bottom:1px solid #f3f4f6; white-space:nowrap; }
+  table.main tr:hover td { background:#f8fafc; }
+  table.main tr.total-row td { background:#f1f5f9; font-weight:700; border-top:2px solid #374151; color:#1a1a1a; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+
+  /* Tech grid */
+  .tech-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin:10px 0 20px; }
+  .tech-card { background:#fafafa; border:1px solid #e5e7eb; border-radius:6px; padding:12px 14px; }
+  .tech-card .label { font-size:0.72rem; color:#6b7280; font-weight:500; }
+  .tech-card .val { font-size:1.15rem; font-weight:700; }
+  .tech-card .sub { font-size:0.66rem; color:#9ca3af; margin-top:2px; }
+
+  /* Methodology */
+  .meth { background:#f8fafc; border:1px solid #e5e7eb; border-radius:6px; padding:16px 20px; margin:20px 0; font-size:0.74rem; color:#374151; line-height:1.6; }
+  .meth h3 { font-size:0.82rem; font-weight:700; color:#1a1a1a; margin-bottom:6px; }
+  .meth ul { padding-left:16px; }
+  .meth li { margin-bottom:3px; }
+
+  /* Footnotes */
+  sup.fn { font-size:0.55rem; color:#6b7280; cursor:help; font-weight:400; vertical-align:super; margin-left:1px; }
+  .footnotes { border-top:1px solid #e5e7eb; margin-top:20px; padding-top:16px; }
+  .footnotes h3 { font-size:0.82rem; font-weight:700; color:#1a1a1a; margin-bottom:10px; }
+  .fn-item { display:flex; gap:8px; margin-bottom:8px; font-size:0.68rem; color:#374151; line-height:1.6; }
+  .fn-num { flex-shrink:0; font-weight:700; color:#6b7280; min-width:18px; }
+  .fn-text { flex:1; }
+  .fn-text code { background:#f3f4f6; padding:1px 4px; border-radius:2px; font-size:0.64rem; font-family:'SF Mono','Consolas',monospace; color:#9a3412; }
+
+  @media print {
+    .metro-section { page-break-before:always; }
+    .metro-map { height:400px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>Comcast / Breezeline (Cogeco): Footprint Overlap &amp; Acquisition Analysis <span class="badge">CONFIDENTIAL</span></h1>
+  <div class="subtitle">FCC BDC June 2025 &mdash; Comcast vs Breezeline (Cogeco Cable Holdings II Inc.) &mdash; 13-state footprint analysis &mdash; Census block group granularity &mdash; April 2026</div>
+  <div style="font-size:0.66rem;color:#9ca3af;margin-top:4px;line-height:1.4"><strong style="color:#6b7280">BSL</strong> = Broadband Serviceable Location &mdash; a single address (home, business, or institution) where a provider has certified broadband service availability per FCC BDC rules. Each BSL has a unique FCC <code style="font-size:0.62rem;background:#f3f4f6;padding:0 3px;border-radius:2px">location_id</code>. A BSL is <strong style="color:#EA580C">overlap</strong> if served by both Comcast AND Breezeline. An <strong style="color:#059669">incremental</strong> BSL is served by Breezeline only (new to Comcast in an acquisition).</div>
+</div>
+
+<div class="strip" id="strip"></div>
+<div class="callout" id="callout"></div>
+
+<div id="exhibit"></div>
+
+<div style="position:relative;margin-bottom:20px">
+  <div class="national-map" id="map-national"></div>
+</div>
+
+<div id="metro-maps"></div>
+
+<h2>Overlap by State &mdash; Acquisition Footprint Analysis</h2>
+<div class="table-wrap" id="state-table"></div>
+
+<h2>Technology Overlap Breakdown<sup class="fn" title="See footnote 8">8</sup></h2>
+<div class="tech-grid" id="tech-grid"></div>
+
+<h2>Top Overlap Counties</h2>
+<div class="table-wrap" id="county-table"></div>
+
+<div class="meth" id="meth"></div>
+
+<div class="footnotes" id="footnotes"></div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="overlap_bg_data.js" onerror="window.BG_OVERLAP={};window.BG_BY_COUNTY={};console.warn('Block group data not loaded');"></script>
+<script>
+// ================================================================
+// COLORS
+// ================================================================
+var CMCSA_BLUE = '#0077C8';
+var CMCSA_FILL = '#0077C8';
+var CMCSA_LIGHT = '#DBEAFE';
+var BREEZE_TEAL = '#0D9488';
+var BREEZE_FILL = '#14B8A6';
+var BREEZE_LIGHT = '#CCFBF1';
+var OVL_ORANGE = '#EA580C';
+var OVL_FILL = '#F97316';
+var OVL_LIGHT = '#FED7AA';
+var INCR_GREEN = '#059669';
+var AMBER = '#d97706';
+
+// ================================================================
+// DATA — populated from overlap_results.json after analysis
+// ================================================================
+var BY_STATE = {"OH":{"ga":646284,"a_fttp":57,"gb":87521,"b_fttp":11100,"overlap":21,"incr":646263},"PA":{"ga":209013,"a_fttp":7454,"gb":3337541,"b_fttp":79965,"overlap":42953,"incr":166060},"NH":{"ga":103075,"a_fttp":30745,"gb":337632,"b_fttp":4197,"overlap":54756,"incr":48319},"CT":{"ga":70460,"a_fttp":7,"gb":674250,"b_fttp":92078,"overlap":66058,"incr":4402},"DE":{"ga":18292,"a_fttp":1,"gb":322726,"b_fttp":8439,"overlap":5198,"incr":13094},"MD":{"ga":93664,"a_fttp":3648,"gb":1613023,"b_fttp":48992,"overlap":16520,"incr":77144},"VA":{"ga":11714,"a_fttp":2216,"gb":1281128,"b_fttp":20967,"overlap":40,"incr":11674},"FL":{"ga":43432,"a_fttp":6813,"gb":3741434,"b_fttp":197513,"overlap":32625,"incr":10807},"SC":{"ga":61773,"a_fttp":1193,"gb":293140,"b_fttp":10377,"overlap":25883,"incr":35890},"WV":{"ga":36394,"a_fttp":14811,"gb":237737,"b_fttp":11778,"overlap":19529,"incr":16865},"ME":{"ga":16446,"a_fttp":781,"gb":55329,"b_fttp":3938,"overlap":11820,"incr":4626},"MA":{"ga":3590,"a_fttp":3590,"gb":1627351,"b_fttp":11224,"overlap":3577,"incr":13},"NY":{"ga":4446,"a_fttp":1,"gb":33079,"b_fttp":756,"overlap":0,"incr":4446}};
+var BDC = {breeze:1318583,comcast:13641891,overlap:278980,incr:1039603,breeze_fttp:71317,comcast_fttp:501324};
+var REPORTED = {breeze:1796000,comcast:65000000,comcast_national_bdc:38643997};
+var FACTOR = {breeze:1.3621,comcast:1.682};
+var FINANCIAL = {
+  breeze: { subs:644000, revenue:'$988M', ebitda:'$492M', margin:'49.8%', pen:'35.9%' },
+  comcast: { subs:'31.3M', revenue:'$80B', ebitda:'$30B' }
+};
+var TECH = {hh:158745,fh:117859,ff:2376};
+var COUNTIES = [{"f":"09011","n":"New London","s":"CT","o":51937,"a":54122,"b":90500,"incr":2185},{"f":"45003","n":"Aiken","s":"SC","o":25820,"a":47981,"b":44750,"incr":22161},{"f":"33017","n":"Strafford","s":"NH","o":25260,"a":37708,"b":29449,"incr":12448},{"f":"42013","n":"Blair","s":"PA","o":22339,"a":45448,"b":26488,"incr":23109},{"f":"12086","n":"Miami-Dade","s":"FL","o":21520,"a":31342,"b":512525,"incr":9822},{"f":"54061","n":"Monongalia","s":"WV","o":19295,"a":19824,"b":34148,"incr":529},{"f":"33001","n":"Belknap","s":"NH","o":15886,"a":33100,"b":15962,"incr":17214},{"f":"09015","n":"Windham","s":"CT","o":14121,"a":16338,"b":14207,"incr":2217},{"f":"33013","n":"Merrimack","s":"NH","o":13214,"a":18422,"b":40377,"incr":5208},{"f":"24037","n":"St. Mary's","s":"MD","o":12270,"a":38032,"b":14514,"incr":25762},{"f":"23031","n":"York","s":"ME","o":11820,"a":16446,"b":24417,"incr":4626},{"f":"42079","n":"Luzerne","s":"PA","o":8435,"a":19411,"b":79972,"incr":10976},{"f":"12099","n":"Palm Beach","s":"FL","o":6974,"a":7923,"b":429262,"incr":949},{"f":"42037","n":"Columbia","s":"PA","o":5674,"a":10155,"b":6376,"incr":4481},{"f":"10003","n":"New Castle","s":"DE","o":5155,"a":17741,"b":171297,"incr":12586},{"f":"12011","n":"Broward","s":"FL","o":4131,"a":4167,"b":435715,"incr":36},{"f":"25009","n":"Essex","s":"MA","o":3577,"a":3590,"b":208911,"incr":13},{"f":"24035","n":"Queen Anne's","s":"MD","o":2813,"a":17984,"b":2948,"incr":15171},{"f":"42009","n":"Bedford","s":"PA","o":1622,"a":5308,"b":12330,"incr":3686},{"f":"42021","n":"Cambria","s":"PA","o":1518,"a":29312,"b":29678,"incr":27794},{"f":"42107","n":"Schuylkill","s":"PA","o":1514,"a":2206,"b":35515,"incr":692},{"f":"24015","n":"Cecil","s":"MD","o":1215,"a":4441,"b":25504,"incr":3226},{"f":"33015","n":"Rockingham","s":"NH","o":391,"a":4310,"b":106009,"incr":3919},{"f":"42129","n":"Westmoreland","s":"PA","o":346,"a":1130,"b":138199,"incr":784},{"f":"42027","n":"Centre","s":"PA","o":291,"a":2038,"b":37714,"incr":1747},{"f":"42125","n":"Washington","s":"PA","o":276,"a":6618,"b":69962,"incr":6342},{"f":"42051","n":"Fayette","s":"PA","o":230,"a":35997,"b":4322,"incr":35767},{"f":"54057","n":"Mineral","s":"WV","o":228,"a":4533,"b":5786,"incr":4305},{"f":"42059","n":"Greene","s":"PA","o":195,"a":6809,"b":3634,"incr":6614},{"f":"42133","n":"York","s":"PA","o":149,"a":149,"b":144069,"incr":0}];
+
+var RES_RATIO = 0.93;
+
+// ================================================================
+// METRO MARKET DEFINITIONS
+// ================================================================
+var METROS = [
+  {
+    id:'oh', title:'Ohio (Columbus / Cleveland)',
+    center:[40.20,-82.50], zoom:7,
+    countyFips:[],
+    note:'Breezeline acquired WOW! Ohio systems (Columbus, Cleveland) in Sep 2021 for $1.125B. Comcast has limited Ohio presence. Ohio is Breezeline\'s largest market (~687K homes) but faces intense FWA competition from T-Mobile/Verizon.',
+  },
+  {
+    id:'ne', title:'New England (NH / ME / CT / MA)',
+    center:[43.00,-71.50], zoom:7,
+    countyFips:[],
+    note:'Breezeline\'s legacy Atlantic Broadband footprint. NH: Breezeline is building FTTP in Concord, directly challenging Comcast. CT/MA: smaller franchise areas adjacent to Comcast territory. ME: Sanford fiber expansion.',
+  },
+  {
+    id:'pa', title:'Pennsylvania',
+    center:[40.80,-77.00], zoom:7,
+    countyFips:[],
+    note:'Both operators have significant PA presence. Comcast is headquartered in Philadelphia with deep suburban penetration. Breezeline serves more rural/exurban communities (Luzerne, Carbon, Cambria, Blair counties). Active FTTP expansion.',
+  },
+  {
+    id:'midatl', title:'Mid-Atlantic (MD / VA / DE)',
+    center:[38.50,-76.50], zoom:7,
+    countyFips:[],
+    note:'Breezeline serves Eastern Shore MD (Kent Island, Centreville), parts of VA (Bowling Green, Caroline). Comcast dominant in DC suburbs, Baltimore metro, Hampton Roads. Adjacent franchises with minimal direct overlap.',
+  },
+];
+
+// ================================================================
+// HELPERS
+// ================================================================
+function fmt(n) { return n.toLocaleString('en-US'); }
+function fmtM(n) { return (n/1e6).toFixed(1)+'M'; }
+function fmtK(n) { return n >= 1000 ? (n/1e3).toFixed(0)+'K' : fmt(n); }
+
+function metroOverlap(fipsList) {
+  var total = 0;
+  fipsList.forEach(function(f) { var c = COUNTIES.find(function(x){return x.f===f;}); if(c) total += c.o; });
+  return total;
+}
+
+// ================================================================
+// RENDER UI
+// ================================================================
+function renderStrip() {
+  var estHH = Math.round(BDC.incr * RES_RATIO);
+  document.getElementById('strip').innerHTML =
+    '<div class="strip-item"><div class="strip-label">Breezeline Passings<sup class="fn" title="See footnote 1">1</sup></div><div class="strip-val" style="color:' + BREEZE_TEAL + '">' + fmtM(REPORTED.breeze) + '</div><div class="strip-sub">1.8M homes passed (US)</div></div>' +
+    '<div class="strip-item"><div class="strip-label">Comcast Passings (13-State)<sup class="fn" title="See footnote 2">2</sup></div><div class="strip-val" style="color:' + CMCSA_BLUE + '">' + fmtM(BDC.comcast) + ' BDC</div><div class="strip-sub">of ' + fmtM(REPORTED.comcast) + ' national</div></div>' +
+    '<div class="strip-item"><div class="strip-label">BDC Confirmed Overlap<sup class="fn" title="See footnote 3">3</sup></div><div class="strip-val" style="color:' + OVL_ORANGE + '">' + fmt(BDC.overlap) + '</div><div class="strip-sub">' + (BDC.breeze>0?(BDC.overlap/BDC.breeze*100).toFixed(1):'0') + '% of Breezeline</div></div>' +
+    '<div class="strip-item"><div class="strip-label">Incremental BSLs<sup class="fn" title="See footnote 4">4</sup></div><div class="strip-val" style="color:' + INCR_GREEN + '">' + fmt(BDC.incr) + '</div><div class="strip-sub">' + (BDC.breeze>0?(BDC.incr/BDC.breeze*100).toFixed(1):'0') + '% new to Comcast</div></div>' +
+    '<div class="strip-item"><div class="strip-label">Incremental Households<sup class="fn" title="See footnote 5">5</sup></div><div class="strip-val" style="color:#374151">' + fmt(estHH) + '</div><div class="strip-sub">~93% residential</div></div>';
+}
+
+function renderCallout() {
+  var ovlPct = BDC.breeze > 0 ? (BDC.overlap/BDC.breeze*100).toFixed(1) : '0';
+  var incrPct = BDC.breeze > 0 ? (BDC.incr/BDC.breeze*100).toFixed(1) : '0';
+  document.getElementById('callout').innerHTML =
+    '<div class="co-block"><div class="co-label">Breezeline Footprint<sup class="fn" title="See footnote 1">1</sup></div><div class="co-val" style="color:' + BREEZE_TEAL + '">' + fmt(BDC.breeze) + '</div><div class="co-sub">BDC confirmed BSLs</div></div>' +
+    '<div class="co-arrow">&rarr;</div>' +
+    '<div class="co-block"><div class="co-label">Overlap (Divestiture Risk)</div><div class="co-val" style="color:' + OVL_ORANGE + '">' + fmt(BDC.overlap) + '</div><div class="co-sub">' + ovlPct + '% of Breezeline<sup class="fn" title="See footnote 3">3</sup></div></div>' +
+    '<div class="co-arrow">&rarr;</div>' +
+    '<div class="co-block"><div class="co-label">Incremental (Comcast Gains)</div><div class="co-val" style="color:' + INCR_GREEN + '">' + fmt(BDC.incr) + '</div><div class="co-sub">' + incrPct + '% new footprint<sup class="fn" title="See footnote 4">4</sup></div></div>' +
+    '<div class="co-arrow">&rarr;</div>' +
+    '<div class="co-block"><div class="co-label">Est. Incremental HH<sup class="fn" title="See footnote 5">5</sup></div><div class="co-val" style="color:#374151">' + fmt(Math.round(BDC.incr * RES_RATIO)) + '</div><div class="co-sub">~93% residential mix</div></div>';
+}
+
+function renderExhibit() {
+  var rows = [
+    {name:'Breezeline (Cogeco)',bdc:BDC.breeze,rep:REPORTED.breeze,color:BREEZE_TEAL,note:'1.80M homes passed (Cogeco Q2 FY2026)'},
+    {name:'Comcast (13-state)',bdc:BDC.comcast,rep:0,color:CMCSA_BLUE,note:'13-state subset of 65M national'},
+    {name:'Comcast (national)',bdc:REPORTED.comcast_national_bdc,rep:REPORTED.comcast,color:CMCSA_BLUE,isSub:true,note:'~65M homes & businesses (Q4 2025)'},
+  ];
+  var maxVal = Math.max(REPORTED.breeze, REPORTED.comcast);
+  var html = '<div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:6px;padding:16px 20px;margin-bottom:16px">' +
+    '<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#374151;margin-bottom:10px">BDC vs Operator-Reported Passings &mdash; Coverage Gap</div>' +
+    '<table class="main"><thead><tr><th>Operator</th><th class="num">BDC BSLs<sup class="fn" title="See footnote 6">6</sup></th><th class="num">Reported Passings<sup class="fn" title="See footnote 7">7</sup></th><th class="num">Gap<sup class="fn" title="See footnote 9">9</sup></th><th class="num">Factor<sup class="fn" title="See footnote 9">9</sup></th></tr></thead><tbody>';
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var gap = r.rep > 0 ? r.rep - r.bdc : 0;
+    var factor = r.rep > 0 && r.bdc > 0 ? (r.rep/r.bdc).toFixed(2) + 'x' : '--';
+    var cls = r.isSub ? ' style="border-top:2px solid #d1d5db;font-weight:700"' : '';
+    html += '<tr' + cls + '><td style="color:' + r.color + ';' + (r.isSub?'font-weight:700':'') + '">' + r.name + '</td><td class="num">' + fmt(r.bdc) + '</td><td class="num">' + (r.rep>0?fmt(r.rep):'--') + '</td><td class="num" style="color:' + AMBER + '">' + (gap>0?'+'+fmt(gap):'--') + '</td><td class="num" style="color:' + OVL_ORANGE + ';font-weight:600">' + factor + '</td></tr>';
+    if (r.name.indexOf('13-state') > -1) html += '<tr><td colspan="5" style="height:4px;border:none"></td></tr>';
+  }
+  html += '</tbody></table>' +
+    '<div style="font-size:0.64rem;color:#9ca3af;margin-top:10px;line-height:1.5"><strong>Gap driver:</strong> BDC = certified serviceable locations. Operator "passings" = franchise territory where plant is nearby. Breezeline gap (' + FACTOR.breeze.toFixed(2) + 'x) typical for mid-size cable operators.</div>' +
+    '<div style="margin-top:8px;font-size:0.6rem;color:#9ca3af;line-height:1.6">' +
+      '<strong style="color:#374151">Sources:</strong> ' +
+      '<span style="color:' + BREEZE_TEAL + '">&#9679;</span> Cogeco Q2 FY2026 Financial Results (Feb 2026) &mdash; 1,796,000 US homes passed &nbsp;' +
+      '<span style="color:' + CMCSA_BLUE + '">&#9679;</span> Comcast Q4 2025 Earnings (Jan 2026) &mdash; ~65M homes & businesses &nbsp;' +
+      '<span style="color:#6b7280">&#9679;</span> FCC BDC Jun 2025 filing (J25) &mdash; 26 state-level CSVs' +
+    '</div>' +
+  '</div>';
+  document.getElementById('exhibit').innerHTML = html;
+}
+
+function renderTechGrid() {
+  var total = TECH.hh + TECH.fh + TECH.ff;
+  var html = '';
+  html += '<div class="tech-card"><div class="label">HFC vs HFC (both cable)</div><div class="val" style="color:' + CMCSA_BLUE + '">' + fmt(TECH.hh) + '</div><div class="sub">' + (total>0?(TECH.hh/total*100).toFixed(1):'0') + '% of overlap &mdash; traditional franchise boundary conflict</div></div>';
+  html += '<div class="tech-card"><div class="label">FTTP vs HFC (mixed tech)</div><div class="val" style="color:' + OVL_ORANGE + '">' + fmt(TECH.fh) + '</div><div class="sub">' + (total>0?(TECH.fh/total*100).toFixed(1):'0') + '% of overlap &mdash; one operator upgraded to fiber</div></div>';
+  html += '<div class="tech-card"><div class="label">FTTP vs FTTP (both fiber)</div><div class="val" style="color:' + INCR_GREEN + '">' + fmt(TECH.ff) + '</div><div class="sub">' + (total>0?(TECH.ff/total*100).toFixed(1):'0') + '% of overlap &mdash; direct fiber-on-fiber competition</div></div>';
+  document.getElementById('tech-grid').innerHTML = html;
+}
+
+function renderStateTable() {
+  var states = [];
+  for (var st in BY_STATE) {
+    if (BY_STATE.hasOwnProperty(st)) states.push([st, BY_STATE[st]]);
+  }
+  states.sort(function(a,b) { return b[1].overlap - a[1].overlap; });
+
+  var rows='', totA=0, totB=0, totOvl=0, totIncr=0, totAF=0, totBF=0;
+  for (var i = 0; i < states.length; i++) {
+    var st = states[i][0], d = states[i][1];
+    if (d.ga === 0 && d.gb === 0) continue;
+    var rate = d.ga > 0 ? (d.overlap/d.ga*100).toFixed(1) : '--';
+    var incrPct = d.ga > 0 ? (d.incr/d.ga*100).toFixed(1) : '--';
+    totA += d.ga; totB += d.gb; totOvl += d.overlap; totIncr += d.incr;
+    totAF += (d.a_fttp||0); totBF += (d.b_fttp||0);
+    rows += '<tr>' +
+      '<td><strong>' + st + '</strong></td>' +
+      '<td class="num" style="color:' + BREEZE_TEAL + '">' + fmt(d.ga) + '</td>' +
+      '<td class="num" style="color:' + BREEZE_TEAL + ';font-size:0.66rem">' + fmt(d.a_fttp||0) + '</td>' +
+      '<td class="num" style="color:' + CMCSA_BLUE + '">' + fmt(d.gb) + '</td>' +
+      '<td class="num" style="color:' + CMCSA_BLUE + ';font-size:0.66rem">' + fmt(d.b_fttp||0) + '</td>' +
+      '<td class="num" style="color:' + OVL_ORANGE + ';font-weight:600">' + (d.overlap>0?fmt(d.overlap):'--') + '</td>' +
+      '<td class="num" style="color:' + INCR_GREEN + '">' + fmt(d.incr) + '</td>' +
+      '<td class="num">' + (d.overlap>0?rate+'%':'--') + '</td>' +
+      '<td class="num">' + incrPct + '%</td>' +
+      '<td class="num">' + fmt(Math.round(d.incr * RES_RATIO)) + '</td>' +
+    '</tr>';
+  }
+  var totRate = totA > 0 ? (totOvl/totA*100).toFixed(1) : '0';
+  var totIncrPct = totA > 0 ? (totIncr/totA*100).toFixed(1) : '0';
+  rows += '<tr class="total-row"><td>TOTAL</td>' +
+    '<td class="num">' + fmt(totA) + '</td>' +
+    '<td class="num">' + fmt(totAF) + '</td>' +
+    '<td class="num">' + fmt(totB) + '</td>' +
+    '<td class="num">' + fmt(totBF) + '</td>' +
+    '<td class="num">' + fmt(totOvl) + '</td>' +
+    '<td class="num">' + fmt(totIncr) + '</td>' +
+    '<td class="num">' + totRate + '%</td>' +
+    '<td class="num">' + totIncrPct + '%</td>' +
+    '<td class="num">' + fmt(Math.round(totIncr * RES_RATIO)) + '</td>' +
+  '</tr>';
+
+  document.getElementById('state-table').innerHTML = '<table class="main"><thead><tr>' +
+    '<th>State</th>' +
+    '<th class="num">Breeze BSLs<sup class="fn" title="See footnote 6">6</sup></th>' +
+    '<th class="num" style="font-size:0.58rem">FTTP</th>' +
+    '<th class="num">Comcast BSLs<sup class="fn" title="See footnote 6">6</sup></th>' +
+    '<th class="num" style="font-size:0.58rem">FTTP</th>' +
+    '<th class="num" style="color:' + OVL_ORANGE + '">Overlap<sup class="fn" title="See footnote 3">3</sup></th>' +
+    '<th class="num" style="color:' + INCR_GREEN + '">Incremental<sup class="fn" title="See footnote 4">4</sup></th>' +
+    '<th class="num">Ovl %</th>' +
+    '<th class="num">Incr %</th>' +
+    '<th class="num">~Incr HH<sup class="fn" title="See footnote 5">5</sup></th>' +
+  '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function renderCountyTable() {
+  if (!COUNTIES.length) { document.getElementById('county-table').innerHTML = '<div style="padding:16px;color:#9ca3af;font-size:0.74rem">County data loading after analysis...</div>'; return; }
+  var rows = '';
+  var limit = Math.min(COUNTIES.length, 30);
+  for (var i = 0; i < limit; i++) {
+    var c = COUNTIES[i];
+    rows += '<tr>' +
+      '<td><strong>' + c.n + '</strong></td>' +
+      '<td>' + c.s + '</td>' +
+      '<td class="num" style="color:' + OVL_ORANGE + ';font-weight:600">' + fmt(c.o) + '</td>' +
+      '<td class="num" style="color:' + BREEZE_TEAL + '">' + fmt(c.a) + '</td>' +
+      '<td class="num" style="color:' + CMCSA_BLUE + '">' + fmt(c.b) + '</td>' +
+      '<td class="num" style="color:' + INCR_GREEN + '">' + fmt(c.incr) + '</td>' +
+    '</tr>';
+  }
+  document.getElementById('county-table').innerHTML = '<table class="main"><thead><tr>' +
+    '<th>County</th><th>State</th>' +
+    '<th class="num" style="color:' + OVL_ORANGE + '">Overlap</th>' +
+    '<th class="num">Breeze BSLs</th>' +
+    '<th class="num">Comcast BSLs</th>' +
+    '<th class="num" style="color:' + INCR_GREEN + '">Incremental</th>' +
+  '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function renderMeth() {
+  document.getElementById('meth').innerHTML =
+    '<h3>Methodology &amp; Assumptions</h3>' +
+    '<ul>' +
+      '<li><strong>Source:</strong> FCC BDC June 2025 filing (J25). 26 state-level CSVs covering Comcast (provider ID 130317) and Breezeline/Cogeco (provider ID 280001) across 13 states</li>' +
+      '<li><strong>Breezeline (Group A):</strong> All broadband tech: FTTP (code 50) + HFC/Cable (codes 40-43). Reported passings: 1,796,000 per Cogeco Q2 FY2026 financial results (Feb 2026)</li>' +
+      '<li><strong>Comcast (Group B):</strong> All broadband tech: FTTP (50) + HFC/Cable (40-43). 13-state subset only (Breezeline footprint states). National reported: ~65M homes & businesses per Q4 2025 earnings</li>' +
+      '<li><strong>Overlap:</strong> BSL-level match on FCC <code>location_id</code>. A location counts as overlap if served by both Comcast AND Breezeline. Unlike fiber-vs-cable overlap, this is cable-vs-cable &mdash; unusual given franchise model</li>' +
+      '<li><strong>Incremental:</strong> BSLs served by Breezeline but NOT by Comcast. These represent the new footprint Comcast would gain in an acquisition</li>' +
+      '<li><strong>Context:</strong> Breezeline and Comcast are both cable operators. Under the franchise model, direct overlap should be minimal. However, Breezeline is building FTTP into some Comcast franchise areas (NH, MA), creating new competitive overlap</li>' +
+      '<li><strong>Residential ratio:</strong> ~93% of BSLs are residential, based on FCC BDC <code>business_residential_code</code> field</li>' +
+      '<li><strong>Acquisition framing:</strong> Low overlap = highly accretive; most of Breezeline is incremental to Comcast. Any overlap locations may require regulatory review</li>' +
+    '</ul>';
+}
+
+function renderFootnotes() {
+  document.getElementById('footnotes').innerHTML =
+    '<h3>Definitions &amp; Footnotes</h3>' +
+    '<div class="fn-item"><div class="fn-num">[1]</div><div class="fn-text"><strong>Breezeline / Cogeco.</strong> Cogeco Cable Holdings II Inc. (FCC provider ID 280001). US subsidiary of Cogeco Communications Inc. (TSX: CCA). Rebranded from Atlantic Broadband in Jan 2022. Reported 1,796,000 US homes passed per Q2 FY2026 financial results (Feb 28, 2026). CDPQ owns 21% directly. 13 states: CT, DE, FL, MA, MD, ME, NH, NY, OH, PA, SC, VA, WV.</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[2]</div><div class="fn-text"><strong>Comcast.</strong> Comcast Corporation (FCC provider ID 130317). BDC data scoped to 13 Breezeline states only (not full 49-state national footprint). National reported: ~65M homes & businesses per Q4 2025 earnings (Jan 2026). National BDC total: 38.6M BSLs across 49 states. National scaling factor: ' + FACTOR.comcast.toFixed(2) + 'x.</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[3]</div><div class="fn-text"><strong>BDC Confirmed Overlap.</strong> Count of unique FCC <code>location_id</code> values served by both Comcast AND Breezeline. Both cable operators generally respect franchise boundaries, so overlap should be minimal. Any overlap indicates franchise boundary anomalies, competitive overbuilds (e.g., Breezeline FTTP into Comcast areas), or BDC mapping artifacts.</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[4]</div><div class="fn-text"><strong>Incremental BSLs.</strong> Locations served by Breezeline but NOT by Comcast. In an acquisition scenario, these represent net new footprint &mdash; the primary strategic value of the transaction. Higher incremental % = more accretive deal.</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[5]</div><div class="fn-text"><strong>~Households.</strong> Estimated residential locations = BSL count &times; 0.93. The 93% residential ratio is a national average from FCC BDC <code>business_residential_code</code>. Actual ratio varies by geography.</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[6]</div><div class="fn-text"><strong>BDC BSLs.</strong> Broadband Serviceable Locations from FCC BDC June 2025 (J25). Includes FTTP (tech 50) + Cable/DOCSIS (tech 40-43). BDC captures only certified locations &mdash; a stricter standard than operator "passings."</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[7]</div><div class="fn-text"><strong>Reported Passings.</strong> Operator-cited passings from earnings releases. Breezeline: Cogeco Q2 FY2026 (Feb 2026). Comcast: Q4 2025 earnings (Jan 2026). Passings typically include franchise territory where plant is deployed nearby, even if not yet certified in BDC.</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[8]</div><div class="fn-text"><strong>Technology Overlap.</strong> Both Comcast and Breezeline serve primarily via HFC/DOCSIS with targeted FTTP expansion. HFC&times;HFC = both cable (standard franchise overlap). FTTP&times;HFC = one upgraded (competitive advantage). FTTP&times;FTTP = direct fiber competition (rare for cable operators).</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[9]</div><div class="fn-text"><strong>Gap &amp; Factor.</strong> Gap = Reported Passings &minus; BDC BSLs. Factor = Reported / BDC. Breezeline: ' + FACTOR.breeze.toFixed(2) + 'x (BDC captures ' + (100/FACTOR.breeze).toFixed(0) + '% of reported). Comcast national: ' + FACTOR.comcast.toFixed(2) + 'x (BDC captures ' + (100/FACTOR.comcast).toFixed(0) + '% of reported).</div></div>' +
+    '<div class="fn-item"><div class="fn-num">[10]</div><div class="fn-text"><strong>Financial Context.</strong> Breezeline US: ~$988M revenue, ~$492M EBITDA, 49.8% margin (LTM est. from Cogeco FY2026 reporting). 644K broadband subscribers. At 6-7x EBITDA = $3.0-3.4B EV. Comcast: 31.3M broadband subs (Q4 2025), ~$80B cable revenue. Breezeline is ~2% of Comcast by subscribers. CDPQ owns 21% of Breezeline directly; Audet family retains control via multiple voting shares.</div></div>';
+}
+
+// ================================================================
+// NATIONAL MAP
+// ================================================================
+function initNationalMap() {
+  var map = L.map('map-national', {zoomControl:true, scrollWheelZoom:true}).setView([39.5, -77.0], 6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+    maxZoom: 18,
+  }).addTo(map);
+
+  // Load state boundaries and shade by provider presence
+  var stateUrl = 'https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json';
+  fetch(stateUrl).then(function(r){return r.json();}).then(function(geojson) {
+    // Breezeline states layer
+    var breezeStates = L.geoJSON(geojson, {
+      filter: function(f) {
+        var abbr = ST_ABBR[f.properties.name];
+        return abbr && BY_STATE[abbr] && BY_STATE[abbr].ga > 0;
+      },
+      style: function(f) {
+        var abbr = ST_ABBR[f.properties.name];
+        var d = BY_STATE[abbr];
+        var opacity = Math.min(0.15 + (d.ga / 200000) * 0.35, 0.5);
+        return { color:BREEZE_TEAL, fillColor:BREEZE_FILL, fillOpacity:opacity, weight:1.5, opacity:0.6 };
+      },
+      onEachFeature: function(f, layer) {
+        var abbr = ST_ABBR[f.properties.name];
+        var d = BY_STATE[abbr];
+        layer.bindPopup(
+          '<div class="popup-hdr" style="color:' + BREEZE_TEAL + '">' + f.properties.name + ' &mdash; Breezeline</div>' +
+          '<div class="popup-row"><span class="popup-lbl">Breezeline BSLs</span><span class="popup-val" style="color:' + BREEZE_TEAL + '">' + fmt(d.ga) + '</span></div>' +
+          '<div class="popup-row"><span class="popup-lbl">Comcast BSLs</span><span class="popup-val" style="color:' + CMCSA_BLUE + '">' + fmt(d.gb) + '</span></div>' +
+          '<div class="popup-row"><span class="popup-lbl">Overlap</span><span class="popup-val" style="color:' + OVL_ORANGE + '">' + fmt(d.overlap) + '</span></div>' +
+          '<div class="popup-row"><span class="popup-lbl">Incremental</span><span class="popup-val" style="color:' + INCR_GREEN + '">' + fmt(d.incr) + '</span></div>'
+        );
+      }
+    }).addTo(map);
+
+    // Comcast states layer (just the 13 states, lighter shade)
+    var comcastStates = L.geoJSON(geojson, {
+      filter: function(f) {
+        var abbr = ST_ABBR[f.properties.name];
+        return abbr && BY_STATE[abbr] && BY_STATE[abbr].gb > 0 && (!BY_STATE[abbr] || BY_STATE[abbr].ga === 0);
+      },
+      style: { color:CMCSA_BLUE, fillColor:CMCSA_FILL, fillOpacity:0.12, weight:1, opacity:0.4 }
+    });
+
+    // Overlap states highlighted
+    var overlapStates = L.geoJSON(geojson, {
+      filter: function(f) {
+        var abbr = ST_ABBR[f.properties.name];
+        return abbr && BY_STATE[abbr] && BY_STATE[abbr].overlap > 0;
+      },
+      style: function(f) {
+        var abbr = ST_ABBR[f.properties.name];
+        var d = BY_STATE[abbr];
+        var opacity = d.ga > 0 ? Math.min(0.15 + (d.overlap / d.ga) * 0.5, 0.5) : 0.1;
+        return { color:OVL_ORANGE, fillColor:OVL_FILL, fillOpacity:opacity, weight:2, opacity:0.7 };
+      },
+      onEachFeature: function(f, layer) {
+        var abbr = ST_ABBR[f.properties.name];
+        var d = BY_STATE[abbr];
+        layer.bindPopup(
+          '<div class="popup-hdr" style="color:' + OVL_ORANGE + '">' + f.properties.name + ' &mdash; Overlap</div>' +
+          '<div class="popup-row"><span class="popup-lbl">Overlap BSLs</span><span class="popup-val" style="color:' + OVL_ORANGE + '">' + fmt(d.overlap) + '</span></div>' +
+          '<div class="popup-row"><span class="popup-lbl">Breezeline</span><span class="popup-val">' + fmt(d.ga) + '</span></div>' +
+          '<div class="popup-row"><span class="popup-lbl">Comcast</span><span class="popup-val">' + fmt(d.gb) + '</span></div>' +
+          '<div class="popup-row"><span class="popup-lbl">Overlap %</span><span class="popup-val">' + (d.ga>0?(d.overlap/d.ga*100).toFixed(1):'0') + '%</span></div>'
+        );
+      }
+    }).addTo(map);
+  });
+
+  // Legend
+  var legend = L.control({position:'bottomright'});
+  legend.onAdd = function() {
+    var div = L.DomUtil.create('div','legend');
+    div.innerHTML =
+      '<div class="legend-title">Legend</div>' +
+      '<span class="legend-swatch" style="background:' + BREEZE_FILL + ';opacity:0.5"></span>Breezeline footprint<br>' +
+      '<span class="legend-swatch" style="background:' + OVL_FILL + ';opacity:0.5"></span>Overlap areas<br>' +
+      '<span class="legend-swatch" style="background:' + CMCSA_FILL + ';opacity:0.2"></span>Comcast-only';
+    return div;
+  };
+  legend.addTo(map);
+}
+
+var ST_ABBR = {
+  'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA','Colorado':'CO',
+  'Connecticut':'CT','Delaware':'DE','District of Columbia':'DC','Florida':'FL','Georgia':'GA',
+  'Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS',
+  'Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA',
+  'Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT',
+  'Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM',
+  'New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK',
+  'Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC','South Dakota':'SD',
+  'Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT','Virginia':'VA','Washington':'WA',
+  'West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY'
+};
+
+// ================================================================
+// METRO MAPS WITH BLOCK GROUP DATA
+// ================================================================
+function initMetroMaps() {
+  if (!BG_OVERLAP || Object.keys(BG_OVERLAP).length === 0) return;
+
+  var container = document.getElementById('metro-maps');
+  METROS.forEach(function(metro) {
+    // Determine county FIPS from block group data for this metro's states
+    var metroCounties = [];
+    if (metro.countyFips && metro.countyFips.length > 0) {
+      metroCounties = metro.countyFips;
+    } else if (BG_BY_COUNTY) {
+      // Auto-detect counties in the metro's region from block group data
+      var stateFips = [];
+      if (metro.id === 'oh') stateFips = ['39'];
+      else if (metro.id === 'ne') stateFips = ['33','23','09','25'];
+      else if (metro.id === 'pa') stateFips = ['42'];
+      else if (metro.id === 'midatl') stateFips = ['24','51','10'];
+
+      for (var county in BG_BY_COUNTY) {
+        if (BG_BY_COUNTY.hasOwnProperty(county)) {
+          var st2 = county.substring(0, 2);
+          if (stateFips.indexOf(st2) > -1) {
+            metroCounties.push(county);
+          }
+        }
+      }
+    }
+
+    if (metroCounties.length === 0) return;
+
+    // Compute metro overlap
+    var metroOvl = 0;
+    metroCounties.forEach(function(cf) {
+      var bgs = BG_BY_COUNTY[cf] || [];
+      bgs.forEach(function(bg) {
+        var d = BG_OVERLAP[bg];
+        if (d) metroOvl += d.o;
+      });
+    });
+
+    var section = document.createElement('div');
+    section.className = 'metro-section';
+    section.innerHTML =
+      '<div class="metro-header">' +
+        '<div class="metro-title">' + metro.title + '</div>' +
+        '<div class="metro-stats"><span style="color:' + OVL_ORANGE + '">' + fmt(metroOvl) + '</span> overlap BSLs across <span>' + metroCounties.length + '</span> counties</div>' +
+      '</div>' +
+      '<div class="metro-map" id="metro-' + metro.id + '"></div>' +
+      '<div class="metro-note">' + metro.note + '</div>';
+    container.appendChild(section);
+
+    // Init Leaflet map
+    var map = L.map('metro-' + metro.id, {zoomControl:true, scrollWheelZoom:true}).setView(metro.center, metro.zoom);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OSM &copy; CARTO', maxZoom: 18
+    }).addTo(map);
+
+    // Load block group polygons for each county
+    var loaded = 0;
+    metroCounties.forEach(function(countyFips) {
+      var state2 = countyFips.substring(0, 2);
+      var county3 = countyFips.substring(2, 5);
+      var url = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer/8/query' +
+        '?where=STATE%3D%27' + state2 + '%27+AND+COUNTY%3D%27' + county3 + '%27' +
+        '&outFields=GEOID,HU100,POP100&f=geojson&outSR=4326&returnGeometry=true';
+
+      fetch(url).then(function(r){return r.json();}).then(function(data) {
+        if (!data.features) return;
+        data.features.forEach(function(f) {
+          var geoid = f.properties.GEOID;
+          var bg12 = geoid ? geoid.substring(0, 12) : '';
+          var ovlData = BG_OVERLAP[bg12];
+          if (!ovlData) return;
+
+          // Draw polygon
+          if (!f.geometry || !f.geometry.coordinates) return;
+          var coords;
+          if (f.geometry.type === 'MultiPolygon') {
+            coords = f.geometry.coordinates.map(function(p) {
+              return p.map(function(r2) {
+                return r2.map(function(c) { return [c[1], c[0]]; });
+              });
+            });
+          } else {
+            coords = f.geometry.coordinates.map(function(r2) {
+              return r2.map(function(c) { return [c[1], c[0]]; });
+            });
+          }
+
+          var isOverlap = ovlData.o > 0;
+          var color = isOverlap ? OVL_ORANGE : BREEZE_TEAL;
+          var opacity = Math.min(0.15 + (ovlData.o / 50) * 0.45, 0.6);
+
+          var poly = L.polygon(coords, {
+            color: color, fillColor: color,
+            fillOpacity: opacity, weight: 0.5, opacity: 0.4,
+          });
+
+          var hu = f.properties.HU100 || 0;
+          var pop = f.properties.POP100 || 0;
+          poly.bindPopup(
+            '<div style="font-family:system-ui;min-width:260px;">' +
+              '<div style="font-size:10px;color:#64748B;">Block Group ' + bg12 + '</div>' +
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0;">' +
+                '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Overlap</div><div style="font-weight:700;font-size:16px;color:' + OVL_ORANGE + ';">' + fmt(ovlData.o) + '</div></div>' +
+                '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Housing Units</div><div style="font-weight:700;font-size:16px;">' + fmt(hu) + '</div></div>' +
+                '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Breezeline</div><div style="font-weight:700;font-size:16px;color:' + BREEZE_TEAL + ';">' + fmt(ovlData.a) + '</div></div>' +
+                '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Comcast</div><div style="font-weight:700;font-size:16px;color:' + CMCSA_BLUE + ';">' + fmt(ovlData.b) + '</div></div>' +
+              '</div>' +
+              '<div style="font-size:9px;color:#94A3B8;">Source: FCC BDC J25 | Census 2020</div>' +
+            '</div>',
+            { maxWidth: 380 }
+          );
+          poly.addTo(map);
+        });
+        loaded++;
+      }).catch(function() { loaded++; });
+    });
+  });
+}
+
+// ================================================================
+// INIT
+// ================================================================
+renderStrip();
+renderCallout();
+renderExhibit();
+renderTechGrid();
+renderStateTable();
+renderCountyTable();
+renderMeth();
+renderFootnotes();
+setTimeout(initNationalMap, 100);
+setTimeout(initMetroMaps, 500);
+
+</script>
+</body>
+</html>
