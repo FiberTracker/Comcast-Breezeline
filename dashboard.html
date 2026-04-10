@@ -442,7 +442,7 @@ function setStatus(msg) { document.getElementById('map-status').textContent = ms
 // Fetch county-level polygons from TIGERweb (Layer 12 = counties)
 function fetchCountyPolygons(stateFips, callback) {
   if (countyPolyCache[stateFips]) { callback(countyPolyCache[stateFips]); return; }
-  var url = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer/10/query' +
+  var url = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer/82/query' +
     '?where=STATE%3D%27' + stateFips + '%27' +
     '&outFields=GEOID,NAME,HU100,POP100&f=geojson&outSR=4326&returnGeometry=true';
   fetch(url).then(function(r) { return r.json(); }).then(function(data) {
