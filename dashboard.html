@@ -122,6 +122,12 @@
 <div id="exhibit"></div>
 
 <div style="position:relative;margin-bottom:20px">
+  <div style="display:flex;gap:8px;margin-bottom:8px;">
+    <button id="btn-breeze" onclick="toggleLayer('breeze')" style="padding:6px 14px;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;border:2px solid #0D9488;background:#0D9488;color:#fff;">Breezeline (92 counties)</button>
+    <button id="btn-comcast" onclick="toggleLayer('comcast')" style="padding:6px 14px;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;border:2px solid #0077C8;background:transparent;color:#0077C8;">Comcast (392 counties)</button>
+    <button id="btn-overlap" onclick="toggleLayer('overlap')" style="padding:6px 14px;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;border:2px solid #EA580C;background:#EA580C;color:#fff;">Overlap (1,810 block groups)</button>
+    <span id="map-status" style="font-size:0.66rem;color:#9ca3af;align-self:center;margin-left:8px;"></span>
+  </div>
   <div class="national-map" id="map-national"></div>
 </div>
 
@@ -144,6 +150,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="overlap_bg_data.js" onerror="window.BG_OVERLAP={};window.BG_BY_COUNTY={};console.warn('Block group data not loaded');"></script>
+<script src="county_data.js" onerror="window.COUNTY_DATA={};window.FOOTPRINT_STATES=[];console.warn('County data not loaded');"></script>
 <script>
 // ================================================================
 // COLORS
@@ -395,50 +402,144 @@ function renderFootnotes() {
 }
 
 // ================================================================
-// NATIONAL MAP — Block Group Level
+// MAP — Three Toggleable Layers
 // ================================================================
-function initNationalMap() {
-  var map = L.map('map-national', {zoomControl:true, scrollWheelZoom:true}).setView([39.5, -77.0], 6);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-    maxZoom: 18,
-  }).addTo(map);
+var mainMap = null;
+var layers = { breeze: L.layerGroup(), comcast: L.layerGroup(), overlap: L.layerGroup() };
+var layerActive = { breeze: true, comcast: false, overlap: true };
+var layerLoaded = { breeze: false, comcast: false, overlap: false };
+var countyPolyCache = {}; // state2 -> { countyFips -> [coords] }
 
-  // Add light state outlines as reference
-  var stateUrl = 'https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json';
-  fetch(stateUrl).then(function(r){return r.json();}).then(function(geojson) {
-    L.geoJSON(geojson, {
-      filter: function(f) {
-        var abbr = ST_ABBR[f.properties.name];
-        return abbr && BY_STATE[abbr] && BY_STATE[abbr].ga > 0;
-      },
-      style: { color:'#9ca3af', fillColor:'transparent', fillOpacity:0, weight:1.5, opacity:0.5, dashArray:'4,3' }
-    }).addTo(map);
-  });
+function toggleLayer(key) {
+  layerActive[key] = !layerActive[key];
+  var btn = document.getElementById('btn-' + key);
+  var colors = { breeze: BREEZE_TEAL, comcast: CMCSA_BLUE, overlap: OVL_ORANGE };
 
-  // Loading indicator
-  var loadingDiv = document.createElement('div');
-  loadingDiv.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:1000;background:#fff;border:1px solid #d1d5db;border-radius:4px;padding:4px 12px;font-size:0.68rem;color:#EA580C;box-shadow:0 1px 4px rgba(0,0,0,0.1);';
-  loadingDiv.id = 'map-loading';
-  loadingDiv.textContent = 'Loading block groups...';
-  document.getElementById('map-national').parentNode.appendChild(loadingDiv);
+  if (layerActive[key]) {
+    mainMap.addLayer(layers[key]);
+    btn.style.background = colors[key];
+    btn.style.color = '#fff';
+    if (!layerLoaded[key]) loadLayer(key);
+  } else {
+    mainMap.removeLayer(layers[key]);
+    btn.style.background = 'transparent';
+    btn.style.color = colors[key];
+  }
+}
 
-  // Load ALL overlap counties' block group polygons from TIGERweb
-  if (!BG_BY_COUNTY || Object.keys(BG_BY_COUNTY).length === 0) {
-    loadingDiv.textContent = 'No block group data available';
-    return;
+function flipCoords(geometry) {
+  if (!geometry || !geometry.coordinates) return [];
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.map(function(p) {
+      return p.map(function(r) { return r.map(function(c) { return [c[1], c[0]]; }); });
+    });
+  }
+  return geometry.coordinates.map(function(r) { return r.map(function(c) { return [c[1], c[0]]; }); });
+}
+
+function setStatus(msg) { document.getElementById('map-status').textContent = msg; }
+
+// Fetch county-level polygons from TIGERweb (Layer 12 = counties)
+function fetchCountyPolygons(stateFips, callback) {
+  if (countyPolyCache[stateFips]) { callback(countyPolyCache[stateFips]); return; }
+  var url = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer/10/query' +
+    '?where=STATE%3D%27' + stateFips + '%27' +
+    '&outFields=GEOID,NAME,HU100,POP100&f=geojson&outSR=4326&returnGeometry=true';
+  fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+    var result = {};
+    if (data.features) {
+      data.features.forEach(function(f) {
+        var fips = f.properties.GEOID;
+        if (fips) result[fips] = f;
+      });
+    }
+    countyPolyCache[stateFips] = result;
+    callback(result);
+  }).catch(function() { callback({}); });
+}
+
+function loadLayer(key) {
+  if (key === 'overlap') { loadOverlapLayer(); return; }
+
+  // County-level layer for Breezeline or Comcast
+  var isBreeze = key === 'breeze';
+  var color = isBreeze ? BREEZE_TEAL : CMCSA_BLUE;
+  var fill = isBreeze ? BREEZE_FILL : CMCSA_FILL;
+  var dataKey = isBreeze ? 'b' : 'c';
+  var ftpKey = isBreeze ? 'bf' : 'cf';
+
+  // Find max BSL count for opacity scaling
+  var maxBsl = 0;
+  for (var cf in COUNTY_DATA) {
+    if (COUNTY_DATA.hasOwnProperty(cf) && COUNTY_DATA[cf][dataKey] > maxBsl) maxBsl = COUNTY_DATA[cf][dataKey];
   }
 
-  var allCounties = Object.keys(BG_BY_COUNTY);
-  var totalCounties = allCounties.length;
-  var loadedCounties = 0;
-  var totalPolys = 0;
+  var states = FOOTPRINT_STATES || [];
+  var loaded = 0;
+  setStatus('Loading ' + key + '... 0/' + states.length + ' states');
 
-  // Find max overlap for color scaling
+  states.forEach(function(st) {
+    fetchCountyPolygons(st, function(countyPolys) {
+      for (var fips in countyPolys) {
+        if (!countyPolys.hasOwnProperty(fips)) continue;
+        var cd = COUNTY_DATA[fips];
+        if (!cd || cd[dataKey] === 0) continue;
+
+        var feat = countyPolys[fips];
+        var coords = flipCoords(feat.geometry);
+        if (!coords.length) continue;
+
+        var bsls = cd[dataKey];
+        var fttp = cd[ftpKey];
+        var opacity = Math.min(0.12 + (bsls / Math.max(maxBsl * 0.15, 1)) * 0.38, 0.5);
+
+        var poly = L.polygon(coords, {
+          color: color, fillColor: fill,
+          fillOpacity: opacity, weight: 0.8, opacity: 0.5,
+        });
+
+        var name = feat.properties.NAME || fips;
+        var hu = parseInt(feat.properties.HU100) || 0;
+        poly.bindPopup(
+          '<div style="font-family:system-ui;min-width:260px;">' +
+            '<div style="font-weight:700;font-size:14px;color:' + color + ';">' + name + ' County</div>' +
+            '<div style="font-size:10px;color:#64748B;margin-bottom:8px;">' + (isBreeze ? 'Breezeline' : 'Comcast') + ' Coverage</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">' +
+              '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Total BSLs</div><div style="font-weight:700;font-size:16px;color:' + color + ';">' + fmt(bsls) + '</div></div>' +
+              '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">FTTP BSLs</div><div style="font-weight:700;font-size:16px;color:#059669;">' + fmt(fttp) + '</div></div>' +
+              '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Housing Units</div><div style="font-weight:700;font-size:16px;">' + fmt(hu) + '</div></div>' +
+              '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">FTTP %</div><div style="font-weight:700;font-size:16px;">' + (bsls > 0 ? (fttp/bsls*100).toFixed(1) : '0') + '%</div></div>' +
+            '</div>' +
+            '<div style="font-size:9px;color:#94A3B8;">Source: FCC BDC J25 (Jun 2025)</div>' +
+          '</div>',
+          { maxWidth: 380 }
+        );
+        poly.addTo(layers[key]);
+      }
+      loaded++;
+      setStatus('Loading ' + key + '... ' + loaded + '/' + states.length + ' states');
+      if (loaded >= states.length) {
+        layerLoaded[key] = true;
+        setStatus('');
+      }
+    });
+  });
+}
+
+function loadOverlapLayer() {
+  if (!BG_BY_COUNTY || Object.keys(BG_BY_COUNTY).length === 0) return;
+
+  var allCounties = Object.keys(BG_BY_COUNTY);
+  var total = allCounties.length;
+  var loaded = 0;
+  var polys = 0;
+
   var maxOvl = 0;
   for (var bg in BG_OVERLAP) {
     if (BG_OVERLAP.hasOwnProperty(bg) && BG_OVERLAP[bg].o > maxOvl) maxOvl = BG_OVERLAP[bg].o;
   }
+
+  setStatus('Loading overlap... 0/' + total + ' counties');
 
   allCounties.forEach(function(countyFips) {
     var state2 = countyFips.substring(0, 2);
@@ -447,96 +548,93 @@ function initNationalMap() {
       '?where=STATE%3D%27' + state2 + '%27+AND+COUNTY%3D%27' + county3 + '%27' +
       '&outFields=GEOID,HU100,POP100&f=geojson&outSR=4326&returnGeometry=true';
 
-    fetch(url).then(function(r){return r.json();}).then(function(data) {
-      if (!data.features) { loadedCounties++; updateLoading(); return; }
-
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data.features) { loaded++; updateOvlStatus(); return; }
       data.features.forEach(function(f) {
         var geoid = f.properties.GEOID;
         var bg12 = geoid ? geoid.substring(0, 12) : '';
         var ovlData = BG_OVERLAP[bg12];
-        if (!ovlData) return;
-        if (!f.geometry || !f.geometry.coordinates) return;
+        if (!ovlData || !f.geometry) return;
 
-        // Flip coords [lng,lat] -> [lat,lng] for L.polygon
-        var coords;
-        if (f.geometry.type === 'MultiPolygon') {
-          coords = f.geometry.coordinates.map(function(p) {
-            return p.map(function(r2) {
-              return r2.map(function(c) { return [c[1], c[0]]; });
-            });
-          });
-        } else {
-          coords = f.geometry.coordinates.map(function(r2) {
-            return r2.map(function(c) { return [c[1], c[0]]; });
-          });
-        }
+        var coords = flipCoords(f.geometry);
+        if (!coords.length) return;
 
-        var isOverlap = ovlData.o > 0;
-        var hasOnlyA = ovlData.a > 0 && ovlData.b === 0;
-        var color, fillColor;
-        if (isOverlap) {
-          color = OVL_ORANGE;
-          fillColor = OVL_FILL;
-        } else if (hasOnlyA) {
-          color = BREEZE_TEAL;
-          fillColor = BREEZE_FILL;
-        } else {
-          color = CMCSA_BLUE;
-          fillColor = CMCSA_FILL;
-        }
-        var opacity = isOverlap ? Math.min(0.25 + (ovlData.o / Math.max(maxOvl * 0.3, 1)) * 0.45, 0.7) : 0.3;
-
+        var opacity = Math.min(0.25 + (ovlData.o / Math.max(maxOvl * 0.3, 1)) * 0.45, 0.7);
         var poly = L.polygon(coords, {
-          color: color, fillColor: fillColor,
-          fillOpacity: opacity, weight: 0.5, opacity: 0.4,
+          color: OVL_ORANGE, fillColor: OVL_FILL,
+          fillOpacity: opacity, weight: 0.5, opacity: 0.5,
         });
 
         var hu = parseInt(f.properties.HU100) || 0;
-        var pop = parseInt(f.properties.POP100) || 0;
         poly.bindPopup(
           '<div style="font-family:system-ui;min-width:280px;">' +
-            '<div style="font-size:10px;color:#64748B;">Census Block Group ' + bg12 + '</div>' +
-            '<div style="font-weight:700;font-size:14px;color:' + color + ';margin:4px 0 8px;">' + (isOverlap ? 'Overlap Area' : hasOnlyA ? 'Breezeline Only' : 'Comcast Only') + '</div>' +
+            '<div style="font-size:10px;color:#64748B;">Block Group ' + bg12 + '</div>' +
+            '<div style="font-weight:700;font-size:14px;color:' + OVL_ORANGE + ';margin:4px 0 8px;">Overlap Area</div>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">' +
               '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Overlap BSLs</div><div style="font-weight:700;font-size:16px;color:' + OVL_ORANGE + ';">' + fmt(ovlData.o) + '</div></div>' +
               '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Housing Units</div><div style="font-weight:700;font-size:16px;">' + fmt(hu) + '</div></div>' +
-              '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Breezeline BSLs</div><div style="font-weight:700;font-size:16px;color:' + BREEZE_TEAL + ';">' + fmt(ovlData.a) + '</div></div>' +
-              '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Comcast BSLs</div><div style="font-weight:700;font-size:16px;color:' + CMCSA_BLUE + ';">' + fmt(ovlData.b) + '</div></div>' +
+              '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Breezeline</div><div style="font-weight:700;font-size:16px;color:' + BREEZE_TEAL + ';">' + fmt(ovlData.a) + '</div></div>' +
+              '<div style="background:#F1F5F9;padding:6px 8px;border-radius:6px;"><div style="font-size:9px;color:#64748B;">Comcast</div><div style="font-weight:700;font-size:16px;color:' + CMCSA_BLUE + ';">' + fmt(ovlData.b) + '</div></div>' +
             '</div>' +
             '<div style="font-size:9px;color:#94A3B8;">Source: FCC BDC J25 | Census 2020</div>' +
           '</div>',
           { maxWidth: 380 }
         );
-        poly.addTo(map);
-        totalPolys++;
+        poly.addTo(layers.overlap);
+        polys++;
       });
-      loadedCounties++;
-      updateLoading();
-    }).catch(function() { loadedCounties++; updateLoading(); });
+      loaded++;
+      updateOvlStatus();
+    }).catch(function() { loaded++; updateOvlStatus(); });
   });
 
-  function updateLoading() {
-    if (loadedCounties < totalCounties) {
-      loadingDiv.textContent = 'Loading block groups... ' + loadedCounties + '/' + totalCounties + ' counties (' + totalPolys + ' polygons)';
+  function updateOvlStatus() {
+    if (loaded < total) {
+      setStatus('Loading overlap... ' + loaded + '/' + total + ' counties (' + polys + ' BGs)');
     } else {
-      loadingDiv.textContent = totalPolys + ' block groups loaded across ' + totalCounties + ' counties';
-      setTimeout(function() { loadingDiv.style.display = 'none'; }, 3000);
+      layerLoaded.overlap = true;
+      setStatus(polys + ' overlap block groups loaded');
+      setTimeout(function() { setStatus(''); }, 3000);
     }
   }
+}
+
+function initNationalMap() {
+  mainMap = L.map('map-national', {zoomControl:true, scrollWheelZoom:true}).setView([39.5, -77.0], 6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+    maxZoom: 18,
+  }).addTo(mainMap);
+
+  // Light state outlines
+  fetch('https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json')
+    .then(function(r) { return r.json(); })
+    .then(function(geojson) {
+      L.geoJSON(geojson, {
+        filter: function(f) { var a = ST_ABBR[f.properties.name]; return a && BY_STATE[a]; },
+        style: { color:'#9ca3af', fillColor:'transparent', fillOpacity:0, weight:1.5, opacity:0.4, dashArray:'4,3' }
+      }).addTo(mainMap);
+    });
+
+  // Add default-on layers and start loading
+  layers.breeze.addTo(mainMap);
+  layers.overlap.addTo(mainMap);
+  loadLayer('breeze');
+  loadLayer('overlap');
 
   // Legend
   var legend = L.control({position:'bottomright'});
   legend.onAdd = function() {
     var div = L.DomUtil.create('div','legend');
     div.innerHTML =
-      '<div class="legend-title">Block Group Level</div>' +
-      '<span class="legend-swatch" style="background:' + OVL_FILL + ';opacity:0.6"></span>Overlap (both serve)<br>' +
-      '<span class="legend-swatch" style="background:' + BREEZE_FILL + ';opacity:0.4"></span>Breezeline only<br>' +
-      '<span class="legend-swatch" style="background:' + CMCSA_FILL + ';opacity:0.3"></span>Comcast only<br>' +
-      '<div style="font-size:0.6rem;color:#9ca3af;margin-top:4px;">Darker = more overlap BSLs</div>';
+      '<div class="legend-title">Layers</div>' +
+      '<span class="legend-swatch" style="background:' + BREEZE_FILL + ';opacity:0.4"></span>Breezeline (county)<br>' +
+      '<span class="legend-swatch" style="background:' + CMCSA_FILL + ';opacity:0.4"></span>Comcast (county)<br>' +
+      '<span class="legend-swatch" style="background:' + OVL_FILL + ';opacity:0.6"></span>Overlap (block group)<br>' +
+      '<div style="font-size:0.6rem;color:#9ca3af;margin-top:4px;">Darker = more BSLs</div>';
     return div;
   };
-  legend.addTo(map);
+  legend.addTo(mainMap);
 }
 
 var ST_ABBR = {
